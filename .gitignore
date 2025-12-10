@@ -29,3 +29,8 @@ dump*/
 *.log
 *.pkl
 *.hdf5
+*.txt
+*.csv
+*.sqlite
+*.png
+prepare_data_json/
