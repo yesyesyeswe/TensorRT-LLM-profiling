@@ -65,20 +65,19 @@ def calculate_avg_bandwidth(merged_dir, output_file):
                 # - sequence_length > 8k: (sequence_length/8k)*56行
                 if seq_len <= 8192:
                 #    prefill_row_count = 56
-                    prefill_row_count = 240
+                    prefill_row_count = 80
                 else:
                 #    prefill_row_count = int((seq_len / 8192) * 56)
-                    prefill_row_count = 240
+                    prefill_row_count = 80
                 
                 # Prefill: 计算出的前N行
-                # prefill_rows = group_sorted.head(prefill_row_count)
-                prefill_rows = group_sorted
+                prefill_rows = group_sorted.head(prefill_row_count)
+                #prefill_rows = group_sorted
                 prefill_avg = prefill_rows['Bandwidth'].mean() if len(prefill_rows) > 0 else 0.0
                 
                 # Decoder: 剩余的行
-                # decoder_rows = group_sorted.iloc[prefill_row_count:]
-                # decoder_avg = decoder_rows['Bandwidth'].mean() if len(decoder_rows) > 0 else 0.0
-                decoder_avg = 0.0
+                decoder_rows = group_sorted.iloc[prefill_row_count:]
+                decoder_avg = decoder_rows['Bandwidth'].mean() if len(decoder_rows) > 0 else 0.0
                 
                 results.append({
                     'Algorithm': algorithm,
