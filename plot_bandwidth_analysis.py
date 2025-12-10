@@ -459,7 +459,7 @@ class BandwidthPlotter:
                 metric_mapping['communication'] = {
                     'prefill': 'Prefill_Communication', 
                     'decoder': 'Decoder_Communication', 
-                    'ylabel': 'Communication (GB)', 
+                    'ylabel': 'Communication (KB)', 
                     'title': 'Communication'
                 }
             else:
