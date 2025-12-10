@@ -70,14 +70,21 @@ def calculate_avg_bandwidth(merged_dir, output_file):
                 #    prefill_row_count = int((seq_len / 8192) * 56)
                     prefill_row_count = 80
                 
-                # Prefill: 计算出的前N行
+                # Prefill: 计算出的前N行 Decoder: 剩余的行
                 prefill_rows = group_sorted.head(prefill_row_count)
-                #prefill_rows = group_sorted
-                prefill_avg = prefill_rows['Bandwidth'].mean() if len(prefill_rows) > 0 else 0.0
-                
-                # Decoder: 剩余的行
                 decoder_rows = group_sorted.iloc[prefill_row_count:]
+
+                # 平均带宽
+                prefill_avg = prefill_rows['Bandwidth'].mean() if len(prefill_rows) > 0 else 0.0
                 decoder_avg = decoder_rows['Bandwidth'].mean() if len(decoder_rows) > 0 else 0.0
+
+                # 平均延迟
+                prefill_avg_latency = prefill_rows['Latency'].mean() if len(prefill_rows) > 0 else 0.0
+                decoder_avg_latency = decoder_rows['Latency'].mean() if len(decoder_rows) > 0 else 0.0
+
+                # 平均通信量
+                prefill_avg_comm = prefill_rows['Communication'].mean() if len(prefill_rows) > 0 else 0.0
+                decoder_avg_comm = decoder_rows['Communication'].mean() / 1024 if len(decoder_rows) > 0 else 0.0
                 
                 results.append({
                     'Algorithm': algorithm,
@@ -87,7 +94,11 @@ def calculate_avg_bandwidth(merged_dir, output_file):
                     'CudaDevice': cuda_device,
                     'MPI_RANK': mpi_rank,
                     'Prefill': round(prefill_avg, 3),
-                    'Decoder': round(decoder_avg, 3)
+                    'Decoder': round(decoder_avg, 3),
+                    'Prefill_Latency': round(prefill_avg_latency, 3),
+                    'Decoder_Latency': round(decoder_avg_latency, 3),
+                    'Prefill_Communication': round(prefill_avg_comm, 3),
+                    'Decoder_Communication': round(decoder_avg_comm, 3)
                 })
                 
         except Exception as e:

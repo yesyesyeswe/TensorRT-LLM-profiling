@@ -104,10 +104,17 @@ def merge_files(comm_file, lat_file, output_dir):
         # 计算带宽：Communication(GB) / Latency(s) = GB/s
         # Communication/1024.0/1024.0/1024.0/Latency*1000.0*1000.0
         if latency_us > 0:  # 避免除零错误
-            Bandwidth = communication_bytes * (1000.0 / 1024.0) * (1000.0 / 1024.0) * (2  * (tp_size - 1) / latency_us) / 1024.0 
+            Bandwidth = communication_bytes * (1000.0 / 1024.0) * (1000.0 / 1024.0) / latency_us / 1024.0 
         else:
             Bandwidth = 0.0
         
+        if comm_row[comm_idx["Algorithm"]][0:4] == "NCCL":
+            Bandwidth = Bandwidth * 2 * (tp_size - 1)
+        elif comm_row[comm_idx["Algorithm"]] == "ONESHOT":
+            Bandwidth = Bandwidth * tp_size * (tp_size - 1)
+        elif comm_row[comm_idx["Algorithm"]] == "TWOSHOT":
+            Bandwidth = Bandwidth * 2 * (tp_size - 1)
+
         # 合并记录，添加带宽列
         merged_rows.append([
             comm_row[comm_idx["Algorithm"]].strip(),
