@@ -5,7 +5,8 @@ import csv
 import argparse
 import sqlite3
 
-DEFAULT_KERNEL = "ncclDevKernel_AllReduce_Sum_f16_RING_LL"
+#                 ncclDevKernel_AllReduce_Sum_bf16_RING_LL
+DEFAULT_KERNEL = "ncclDevKernel_AllReduce_Sum_bf16_RING_LL"
 
 def find_sqlites(input_path: str):
     paths = []

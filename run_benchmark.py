@@ -31,7 +31,7 @@ FIGURES_DIR = BASE / "figures"
 PREPARE_DATASET = Path("/root/autodl-tmp/TensorRT-LLM/benchmarks/cpp/prepare_dataset.py")
 BENCH_BIN = Path("/root/autodl-tmp/TensorRT-LLM/cpp/build/benchmarks/gptManagerBenchmark")
 TOKENIZER_DIR = Path("/root/autodl-tmp/tmp/Qwen/14B/14B")
-ENGINE_BASE = Path("/root/autodl-tmp/tmp/qwen/14B/trt_engines/fp16")
+ENGINE_BASE = Path("/root/autodl-tmp/tmp/qwen/14B/trt_engines/bf16")
 EXTRACT_SCRIPT = BASE / "extract_nccl_latency.py"
 
 
@@ -213,10 +213,7 @@ def merge_communication_csv(batch_size, seq_len, tp_size, su_algo, nccl_proto=No
             writer = csv.writer(f)
             writer.writerows(merged_rows)
         print(f"Successfully merged {len(gpu_files)} files into: {merged_path}")
-        
-        # Sort the merged file by CudaDevice
-        sort_comm_csv(str(merged_path))
-        
+    
         return True
         
     except Exception as e:
@@ -233,7 +230,12 @@ def run_extract_latency(batch_size, seq_label, su_algo, tp, nccl_proto, nsys_out
     env["SEQUENCE_LENGTH"] = str(seq_label)
     env["SU_ALGO"] = str(su_algo)
     env["TP"] = str(tp)
-    kernel = "ncclDevKernel_AllReduce_Sum_f16_RING_LL"
+    precision = "bf16"
+    if "fp16" in str(ENGINE_BASE):
+        precision = "f16"
+    elif "fp32" in str(ENGINE_BASE):
+        precision = "f32"
+    kernel = f"ncclDevKernel_AllReduce_Sum_{precision}_RING_LL"
     if su_algo == "NCCL" and nccl_proto:
         env["NCCL_PROTO"] = str(nccl_proto)
     else:
@@ -440,18 +442,6 @@ def plot_graphs(all_csv_path):
         y_total = g["total_latency(ms)"].tolist() if "total_latency(ms)" in g.columns else []
         y_ttft = g["avg_time_to_first_token(ms)"].tolist() if "avg_time_to_first_token(ms)" in g.columns else []
         y_inter = g["avg_inter_token_latency(ms)"].tolist() if "avg_inter_token_latency(ms)" in g.columns else []
-        # 1) 通信量
-        if x and y_comm:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.plot(x, y_comm, marker="o")
-            ax.set_xlabel("sequence_length")
-            ax.set_ylabel("Total tokens (token_throughput × total_latency_s)")
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            ax.grid(True, which="both", ls="--", alpha=0.5)
-            fig.tight_layout(pad=2)          # 关键：多留边距
-            fig.savefig(RESULTS_DIR / f"batch{b}_communication.png", dpi=200)
-            plt.close(fig)
 
         # 2) 总延迟
         if x and y_total:

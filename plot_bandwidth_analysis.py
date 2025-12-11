@@ -148,7 +148,7 @@ class BandwidthPlotter:
                 ax_prefill.set_xlabel('Sequence Length (log₂ scale)')
                 ax_prefill.set_ylabel('Bandwidth (GB/s) (log₂ scale)')
                 device_title = f"{device_labels[device]}" if tp_size > 1 else ""
-                ax_prefill.set_title(f'{algo} {device_title} - Prefill Bandwidth (Log₂-Log₂ Scale)', pad=10)
+                ax_prefill.set_title(f'{algo} {device_title} - Prefill Bandwidth (Log₂-Log₂ Scale)', pad=15)
                 ax_prefill.grid(True, alpha=0.3)
                 ax_prefill.legend()
                 
@@ -167,7 +167,7 @@ class BandwidthPlotter:
                                                 xytext=(0,10), ha='center', fontsize=8)
                 ax_decoder.set_xlabel('Sequence Length (log₂ scale)')
                 ax_decoder.set_ylabel('Bandwidth (GB/s) (log₂ scale)')
-                ax_decoder.set_title(f'{algo} {device_title} - Decoder Bandwidth (Log₂-Log₂ Scale)', pad=10)
+                ax_decoder.set_title(f'{algo} {device_title} - Decoder Bandwidth (Log₂-Log₂ Scale)', pad=15)
                 ax_decoder.grid(True, alpha=0.3)
                 ax_decoder.legend()
                 
@@ -240,10 +240,6 @@ class BandwidthPlotter:
         
         # 检查通信相关列 - 支持多种命名约定
         communication_cols = []
-        if 'Communication_Prefill' in self.df.columns:
-            communication_cols.append('Communication_Prefill')
-        if 'Communication_Decoder' in self.df.columns:
-            communication_cols.append('Communication_Decoder')
         if 'Prefill_Communication' in self.df.columns:
             communication_cols.append('Prefill_Communication')
         if 'Decoder_Communication' in self.df.columns:
@@ -341,7 +337,7 @@ class BandwidthPlotter:
                 ax_prefill.set_xlabel('Batch Size')
                 ax_prefill.set_ylabel('Bandwidth (GB/s)')
                 device_title = f"{device_labels[device]}" if tp_size > 1 else ""
-                ax_prefill.set_title(f'{algo} {device_title} - Prefill Bandwidth (Log-Log Scale)', pad=10)
+                ax_prefill.set_title(f'{algo} {device_title} - Prefill Bandwidth (Log-Log Scale)', pad=15)
                 ax_prefill.grid(True, alpha=0.3)
                 ax_prefill.legend()
                 
@@ -359,7 +355,7 @@ class BandwidthPlotter:
                                                 xytext=(0,10), ha='center', fontsize=8)
                 ax_decoder.set_xlabel('Batch Size')
                 ax_decoder.set_ylabel('Bandwidth (GB/s)')
-                ax_decoder.set_title(f'{algo} {device_title} - Decoder Bandwidth (Log-Log Scale)', pad=10)
+                ax_decoder.set_title(f'{algo} {device_title} - Decoder Bandwidth (Log-Log Scale)', pad=15)
                 ax_decoder.grid(True, alpha=0.3)
                 ax_decoder.legend()
                 
@@ -440,7 +436,7 @@ class BandwidthPlotter:
             return None
         
         # 创建2x2子图
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10), squeeze=False)
+        fig, axes = plt.subplots(tp_size, 2, figsize=(15, 10), squeeze=False)
         
         # 设置指标对应的列名和标签
         metric_mapping = {
@@ -477,7 +473,7 @@ class BandwidthPlotter:
         metric_info = metric_mapping[metric]
         
         # 为每个GPU设备和阶段绘制对比图
-        for gpu_idx, device in enumerate(unique_devices[:2]):  # 只处理前两个GPU
+        for gpu_idx, device in enumerate(unique_devices): 
             device_data = filtered_df[filtered_df['CudaDevice'] == device]
             
             if len(device_data) == 0:
@@ -543,9 +539,9 @@ class BandwidthPlotter:
             for ax, phase in [(ax_prefill, 'Prefill'), (ax_decoder, 'Decoder')]:
                 ax.set_xlabel(x_label)
                 ax.set_ylabel(metric_info['ylabel'])
-                ax.set_title(f'GPU{device} {phase} {metric_info["title"]} Comparison', pad=10)
+                ax.set_title(f'GPU{device} {phase} {metric_info["title"]} Comparison', pad=15)
                 ax.grid(True, alpha=0.3)
-                ax.legend()
+                ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
                 
                 # 根据x_axis类型设置坐标轴
                 if x_axis == 'sequence_length':

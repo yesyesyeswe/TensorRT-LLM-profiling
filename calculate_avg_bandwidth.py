@@ -83,7 +83,7 @@ def calculate_avg_bandwidth(merged_dir, output_file):
                 decoder_avg_latency = decoder_rows['Latency'].mean() if len(decoder_rows) > 0 else 0.0
 
                 # 平均通信量
-                prefill_avg_comm = prefill_rows['Communication'].mean() /1024 if len(prefill_rows) > 0 else 0.0
+                prefill_avg_comm = prefill_rows['Communication'].mean() / 1024 if len(prefill_rows) > 0 else 0.0
                 decoder_avg_comm = decoder_rows['Communication'].mean() / 1024 if len(decoder_rows) > 0 else 0.0
                 
                 results.append({

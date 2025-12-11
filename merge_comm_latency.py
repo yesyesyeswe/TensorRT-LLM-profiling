@@ -96,10 +96,17 @@ def merge_files(comm_file, lat_file, output_dir):
         ensure_columns(set(comm_header), REQUIRED_COMM_COLS, "Communication")
         ensure_columns(set(lat_header), REQUIRED_LAT_COLS, "Latency")
         
-        # 提取数值进行带宽计算
-        communication_bytes = float(comm_row[comm_idx["Communication"]].strip())
-        latency_us = float(lat_row[lat_idx["Latency"]].strip())
         tp_size = int(comm_row[comm_idx["TP_Size"]].strip())  # 获取TP值
+        if comm_row[comm_idx["Algorithm"]][0:4] == "NCCL":
+            comm_row[comm_idx["Communication"]] = float(comm_row[comm_idx["Communication"]].strip()) * 2 * (tp_size - 1)
+        elif comm_row[comm_idx["Algorithm"]] == "ONESHOT":
+            comm_row[comm_idx["Communication"]] = float(comm_row[comm_idx["Communication"]].strip()) * tp_size * (tp_size - 1)
+        elif comm_row[comm_idx["Algorithm"]] == "TWOSHOT":
+            comm_row[comm_idx["Communication"]] = float(comm_row[comm_idx["Communication"]].strip()) * 2 * (tp_size - 1)
+
+        # 提取数值进行带宽计算
+        communication_bytes = comm_row[comm_idx["Communication"]]
+        latency_us = float(lat_row[lat_idx["Latency"]].strip())
         
         # 计算带宽：Communication(GB) / Latency(s) = GB/s
         # Communication/1024.0/1024.0/1024.0/Latency*1000.0*1000.0
@@ -107,13 +114,6 @@ def merge_files(comm_file, lat_file, output_dir):
             Bandwidth = communication_bytes * (1000.0 / 1024.0) * (1000.0 / 1024.0) / latency_us / 1024.0 
         else:
             Bandwidth = 0.0
-        
-        if comm_row[comm_idx["Algorithm"]][0:4] == "NCCL":
-            Bandwidth = Bandwidth * 2 * (tp_size - 1)
-        elif comm_row[comm_idx["Algorithm"]] == "ONESHOT":
-            Bandwidth = Bandwidth * tp_size * (tp_size - 1)
-        elif comm_row[comm_idx["Algorithm"]] == "TWOSHOT":
-            Bandwidth = Bandwidth * 2 * (tp_size - 1)
 
         # 合并记录，添加带宽列
         merged_rows.append([
@@ -124,7 +124,7 @@ def merge_files(comm_file, lat_file, output_dir):
             comm_row[comm_idx["CudaDevice"]].strip(),
             comm_row[comm_idx["MPI_Rank"]].strip(),
             lat_row[lat_idx["Latency"]].strip(),
-            comm_row[comm_idx["Communication"]].strip(),
+            comm_row[comm_idx["Communication"]],
             f"{Bandwidth:.3f}",  # 保留3位小数
         ])
 
