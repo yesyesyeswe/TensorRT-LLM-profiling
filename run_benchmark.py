@@ -5,7 +5,6 @@ import csv
 from pathlib import Path
 import argparse
 
-# SEQ_LABELS = ["128", "256", "512", "1k", "2k", "4k", "8k", "16k", "32k", "64k"]
 SEQ_LABELS = ["128", "256", "512", "1k", "2k"]
 BATCH_SIZES = [1, 2, 3, 4, 5]
 SEQ_MAP = {
@@ -21,12 +20,12 @@ SEQ_MAP = {
     "64k": 65536,
 }
 
-
 BASE = Path("/root/autodl-tmp/TensorRT-LLM/mybenchmark")
 DATA_DIR = BASE / "prepare_data_json"
 RESULTS_DIR = BASE / "results"
 SQLITES_DIR = RESULTS_DIR / "sqlites"
 COMM_DIR = RESULTS_DIR / "communication"
+E2E_DIR = RESULTS_DIR / "e2e"
 FIGURES_DIR = BASE / "figures"
 PREPARE_DATASET = Path("/root/autodl-tmp/TensorRT-LLM/benchmarks/cpp/prepare_dataset.py")
 BENCH_BIN = Path("/root/autodl-tmp/TensorRT-LLM/cpp/build/benchmarks/gptManagerBenchmark")
@@ -34,14 +33,13 @@ TOKENIZER_DIR = Path("/root/autodl-tmp/tmp/Qwen/14B/14B")
 ENGINE_BASE = Path("/root/autodl-tmp/tmp/qwen/14B/trt_engines/bf16")
 EXTRACT_SCRIPT = BASE / "extract_nccl_latency.py"
 
-
 def ensure_dirs():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     SQLITES_DIR.mkdir(parents=True, exist_ok=True)
     COMM_DIR.mkdir(parents=True, exist_ok=True)
+    E2E_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def ensure_pydeps():
     try:
@@ -52,7 +50,6 @@ def ensure_pydeps():
         import matplotlib  # noqa: F401
     except Exception:
         subprocess.run([sys.executable, "-m", "pip", "install", "matplotlib"], check=False)
-
 
 def generate_dataset(seq_label, batch_size, su_algo, tp, nccl_proto):
     input_mean = SEQ_MAP[str(seq_label)]
@@ -70,18 +67,17 @@ def generate_dataset(seq_label, batch_size, su_algo, tp, nccl_proto):
         str(TOKENIZER_DIR),
         "token-norm-dist",
         "--num-requests",
-        "1",
+        "10",
         "--input-mean",
         str(input_mean),
         "--input-stdev",
         "0",
         "--output-mean",
-        "1",
+        "10",
         "--output-stdev",
         "0",
     ]
     return subprocess.run(cmd, check=False).returncode == 0
-
 
 def run_benchmark(seq_label, batch_size, su_algo, tp, nccl_proto):
     dataset_path = DATA_DIR / f"token_norm_dist_sl{seq_label}.json"
@@ -90,19 +86,31 @@ def run_benchmark(seq_label, batch_size, su_algo, tp, nccl_proto):
     else:
         nsys_out = SQLITES_DIR / f"bs{batch_size}_sl{seq_label}_tp{tp}_algo{su_algo}"
 
-#"--trace=cuda,osrt",
+    #"--trace=cuda,osrt",
     engine_dir = ENGINE_BASE / f"{tp}-gpu"
+    
+    # Create e2e CSV filename with NCCL protocol suffix if applicable
+    csv_filename = f"e2e_bs{batch_size}_sl{seq_label}_tp{tp}_algo{su_algo}"
+    if su_algo == "NCCL" and nccl_proto:
+        csv_filename += f"_{nccl_proto}"
+    csv_filename += ".csv"
+    
+    out_csv = E2E_DIR / csv_filename
     cmd = [
         "nsys", "profile",
         "--export=sqlite",
+        "--trace=cuda,osrt",
         "--output", str(nsys_out),
         "mpirun", "-n", str(tp), "--allow-run-as-root",
         str(BENCH_BIN),
         "--engine_dir", str(engine_dir),
         "--request_rate", "-1",
+        "--streaming",
         "--warm_up", "10",
         "--static_emulated_batch_size", "1",
         "--dataset", str(dataset_path),
+        "--output_csv",
+        str(out_csv),
     ]
     env = os.environ.copy()
     env["COMM_RESULTS_DIR"] = str(COMM_DIR)
@@ -150,7 +158,6 @@ def sort_comm_csv(path):
         w = csv.writer(f)
         w.writerow(header)
         w.writerows(valid_body)
-
 
 def merge_communication_csv(batch_size, seq_len, tp_size, su_algo, nccl_proto=None):
     """Merge multiple GPU-specific communication CSV files into a single file."""
@@ -220,7 +227,6 @@ def merge_communication_csv(batch_size, seq_len, tp_size, su_algo, nccl_proto=No
         print(f"Error writing merged file {merged_path}: {e}")
         return False
 
-
 def run_extract_latency(batch_size, seq_label, su_algo, tp, nccl_proto, nsys_out_prefix):
     sqlite_path = Path(f"{nsys_out_prefix}.sqlite")
     if not sqlite_path.exists():
@@ -253,34 +259,78 @@ def run_extract_latency(batch_size, seq_label, su_algo, tp, nccl_proto, nsys_out
     ]
     return subprocess.run(cmd, check=False, env=env).returncode == 0
 
-
-def merge_csv():
+def merge_e2e_csv():
+    """合并所有e2e结果到e2e_results.csv，包含算法信息用于对比"""
     import pandas as pd
     frames = []
-    for p in RESULTS_DIR.glob("result_*.csv"):
+    
+    # 遍历e2e目录中的所有CSV文件
+    for csv_file in E2E_DIR.glob("e2e_*.csv"):
         try:
-            df = pd.read_csv(p)
-        except Exception:
+            df = pd.read_csv(csv_file)
+            if df.empty:
+                continue
+                
+            # 清理未命名的列
+            df = df.loc[:, ~df.columns.str.contains("^Unnamed")] if hasattr(df.columns, "str") else df
+            
+            # 从文件名解析参数
+            filename = csv_file.stem  # 移除.csv后缀
+            parts = filename.split("_")
+            
+            try:
+                # 解析基础参数 e2e_bs{batch_size}_sl{seq_label}_tp{tp}_algo{algo}[_{nccl_proto}]
+                batch_size = int(parts[1].replace("bs", ""))
+                seq_label = parts[2].replace("sl", "")
+                tp = int(parts[3].replace("tp", ""))
+                algo = parts[4].replace("algo", "")
+                
+                # 解析NCCL协议（如果存在）
+                nccl_proto = None
+                if len(parts) > 5:
+                    nccl_proto = parts[5]
+                
+            except (ValueError, IndexError) as e:
+                print(f"警告: 无法解析文件名 {filename}: {e}")
+                continue
+            
+            # 添加标识列
+            df.insert(0, "algorithm", algo)
+            if nccl_proto:
+                df.insert(1, "nccl_protocol", nccl_proto)
+            else:
+                df.insert(1, "nccl_protocol", "")
+            df.insert(2, "batch_size", batch_size)
+            df.insert(3, "sequence_length", seq_label)
+            df.insert(4, "sequence_length_num", SEQ_MAP.get(seq_label, None))
+            df.insert(5, "tp_size", tp)
+            
+            frames.append(df)
+            
+        except Exception as e:
+            print(f"警告: 处理文件 {csv_file} 时出错: {e}")
             continue
-        df = df.loc[:, ~df.columns.str.contains("^Unnamed")] if hasattr(df.columns, "str") else df
-        name = p.stem
-        try:
-            parts = name.split("_")
-            b = int(parts[1])
-            s = "_".join(parts[2:])
-        except Exception:
-            continue
-        df.insert(0, "batch_size", b)
-        df.insert(1, "sequence_length", s)
-        df.insert(2, "sequence_length_num", SEQ_MAP.get(s, None))
-        frames.append(df)
+    
     if not frames:
+        print("没有找到e2e CSV文件进行合并")
         return None
+    
+    # 合并所有数据框
     all_df = pd.concat(frames, ignore_index=True)
-    out = RESULTS_DIR / "all_results.csv"
+    
+    # 保存合并结果
+    out = E2E_DIR / "e2e_results.csv"
     all_df.to_csv(out, index=False)
+    print(f"e2e结果已合并到: {out}")
+    print(f"合并了 {len(frames)} 个文件，总共 {len(all_df)} 行数据")
+    
+    # 显示基本信息
+    if "algorithm" in all_df.columns:
+        print("包含的算法:", all_df["algorithm"].unique())
+    if "nccl_protocol" in all_df.columns and not all_df["nccl_protocol"].eq("").all():
+        print("包含的NCCL协议:", all_df[all_df["nccl_protocol"] != ""]["nccl_protocol"].unique())
+    
     return out
-
 
 def generate_bandwidth_plots(sequence_lengths=None, batch_sizes=None, tp_sizes=None, algorithms=None, 
                              comparison_metrics=None, x_axis_types=None):
@@ -425,68 +475,155 @@ def generate_bandwidth_plots(sequence_lengths=None, batch_sizes=None, tp_sizes=N
     print(f"[INFO] 带宽分析图表生成完成，结果保存在: {FIGURES_DIR}")
     print(f"[INFO] 共生成 {plot_count} 个图表")
 
-
-def plot_graphs(all_csv_path):
+def plot_e2e_comparison_graphs(e2e_csv_path):
+    """绘制多算法对比图，基于e2e_results.csv"""
     import pandas as pd
     import matplotlib.pyplot as plt
-    df = pd.read_csv(all_csv_path)
+    import numpy as np
+    
+    try:
+        df = pd.read_csv(e2e_csv_path)
+    except Exception as e:
+        print(f"读取e2e结果文件失败: {e}")
+        return
+    
+    # 清理数据
     df = df.loc[:, ~df.columns.str.contains("^Unnamed")] if hasattr(df.columns, "str") else df
     df = df.dropna(subset=["sequence_length_num"]) if "sequence_length_num" in df.columns else df
-    if "batch_size" not in df.columns or "sequence_length" not in df.columns:
+    
+    if "batch_size" not in df.columns or "sequence_length" not in df.columns or "algorithm" not in df.columns:
+        print("e2e结果缺少必要列")
         return
-    df = df.sort_values(["batch_size", "sequence_length_num"]) if "sequence_length_num" in df.columns else df
-    for b in sorted(df["batch_size"].unique()):
-        g = df[df["batch_size"] == b]
-        x = g["sequence_length_num"].tolist()
-        y_comm = (g["token_throughput(token/sec)"] * (g["total_latency(ms)"] / 1000.0)).tolist() if "token_throughput(token/sec)" in g.columns and "total_latency(ms)" in g.columns else []
-        y_total = g["total_latency(ms)"].tolist() if "total_latency(ms)" in g.columns else []
-        y_ttft = g["avg_time_to_first_token(ms)"].tolist() if "avg_time_to_first_token(ms)" in g.columns else []
-        y_inter = g["avg_inter_token_latency(ms)"].tolist() if "avg_inter_token_latency(ms)" in g.columns else []
-
-        # 2) 总延迟
-        if x and y_total:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.plot(x, y_total, marker="o", color="C1")
+    
+    # 排序
+    df = df.sort_values(["batch_size", "sequence_length_num", "algorithm"]) if "sequence_length_num" in df.columns else df
+    
+    # 获取所有算法和NCCL协议
+    algorithms = sorted(df["algorithm"].unique())
+    has_nccl_proto = "nccl_protocol" in df.columns and not df["nccl_protocol"].eq("").all()
+    
+    # 为每个batch size生成对比图
+    for batch_size in sorted(df["batch_size"].unique()):
+        batch_df = df[df["batch_size"] == batch_size]
+        
+        # 获取指标列
+        metrics = {}
+        if "total_latency(ms)" in batch_df.columns:
+            metrics["total_latency"] = "total_latency(ms)"
+        if "avg_time_to_first_token(ms)" in batch_df.columns:
+            metrics["ttft"] = "avg_time_to_first_token(ms)"
+        if "avg_inter_token_latency(ms)" in batch_df.columns:
+            metrics["inter_token"] = "avg_inter_token_latency(ms)"
+        if "token_throughput(token/sec)" in batch_df.columns:
+            metrics["throughput"] = "token_throughput(token/sec)"
+        
+        # 为每个指标生成对比图
+        for metric_key, metric_label in metrics.items():
+            # 准备x轴数据（sequence_length）
+            seq_lengths = sorted(batch_df["sequence_length_num"].unique())
+            if not seq_lengths:
+                continue
+                
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # 为每个算法绘制数据
+            valid_lines = []  # 跟踪有效的数据线
+            for i, algo in enumerate(algorithms):
+                algo_df = batch_df[batch_df["algorithm"] == algo]
+                
+                # 如果有NCCL协议，分别处理每个协议
+                if has_nccl_proto and algo == "NCCL":
+                    nccl_protos = sorted(algo_df[algo_df["nccl_protocol"] != ""]["nccl_protocol"].unique())
+                    for j, proto in enumerate(nccl_protos):
+                        proto_df = algo_df[algo_df["nccl_protocol"] == proto]
+                        
+                        y_values = []
+                        for seq_len in seq_lengths:
+                            seq_df = proto_df[proto_df["sequence_length_num"] == seq_len]
+                            if len(seq_df) > 0 and metric_label in seq_df.columns:
+                                y_values.append(seq_df[metric_label].mean())
+                            else:
+                                y_values.append(np.nan)
+                        
+                        # 只绘制有有效数据的线条
+                        if y_values and any(not np.isnan(y) for y in y_values):
+                            # 绘制线条
+                            label = f"{algo}_{proto}"
+                            color = plt.cm.tab20(i * len(nccl_protos) + j)
+                            ax.plot(range(len(seq_lengths)), y_values, marker='o', linewidth=2, label=label, color=color)
+                            valid_lines.append(y_values)
+                            
+                            # 在数据点处添加数值标注
+                            for x, y in enumerate(y_values):
+                                if not np.isnan(y):
+                                    ax.annotate(f'{y:.1f}', (x, y), 
+                                              textcoords="offset points", 
+                                              xytext=(0, 10), ha='center', fontsize=8)
+                        
+                else:
+                    # 非NCCL算法或没有协议区分
+                    y_values = []
+                    for seq_len in seq_lengths:
+                        seq_df = algo_df[algo_df["sequence_length_num"] == seq_len]
+                        if len(seq_df) > 0 and metric_label in seq_df.columns:
+                            y_values.append(seq_df[metric_label].mean())
+                        else:
+                            y_values.append(np.nan)
+                    
+                    # 只绘制有有效数据的线条
+                    if y_values and any(not np.isnan(y) for y in y_values):
+                        # 绘制线条
+                        color = plt.cm.tab20(i)
+                        ax.plot(range(len(seq_lengths)), y_values, marker='o', linewidth=2, label=algo, color=color)
+                        valid_lines.append(y_values)
+                        
+                        # 在数据点处添加数值标注
+                        for x, y in enumerate(y_values):
+                            if not np.isnan(y):
+                                ax.annotate(f'{y:.1f}', (x, y), 
+                                          textcoords="offset points", 
+                                          xytext=(0, 10), ha='center', fontsize=8)
+            
+            # 如果没有有效数据，跳过此图
+            if not valid_lines:
+                plt.close(fig)
+                continue
+            
+            # 设置图表属性
             ax.set_xlabel("sequence_length")
-            ax.set_ylabel("total_latency (ms)")
-            ax.set_xscale("log")
-            ax.set_yscale("log")
+            ax.set_ylabel(metric_label)
+            ax.set_title(f"Batch Size {batch_size} - {metric_label} Comparison")
+            ax.set_xticks(range(len(seq_lengths)))
+            ax.set_xticklabels([str(int(seq)) for seq in seq_lengths])
+            
+            # 根据数据范围决定是否使用对数坐标
+            y_data = []
+            for line_data in valid_lines:
+                y_data.extend([y for y in line_data if not np.isnan(y) and y > 0])
+            
+            if y_data:
+                y_min, y_max = min(y_data), max(y_data)
+                if y_max / y_min > 100:  # 如果数据范围很大，使用对数坐标
+                    ax.set_yscale("log")
+            
             ax.grid(True, which="both", ls="--", alpha=0.5)
-            fig.tight_layout(pad=2)
-            fig.savefig(RESULTS_DIR / f"batch{b}_total_latency.png", dpi=200)
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            fig.tight_layout()
+            
+            # 保存图表
+            safe_metric_name = metric_key.replace("/", "_").replace(" ", "_")
+            output_path = FIGURES_DIR / f"batch{batch_size}_{safe_metric_name}_comparison.png"
+            fig.savefig(output_path, dpi=300, bbox_inches='tight')
+            print(f"生成对比图: {output_path}")
             plt.close(fig)
-
-        # 3) 首 token
-        if x and y_ttft:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.plot(x, y_ttft, marker="o", color="C2")
-            ax.set_xlabel("sequence_length")
-            ax.set_ylabel("avg_time_to_first_token (ms)")
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            ax.grid(True, which="both", ls="--", alpha=0.5)
-            fig.tight_layout(pad=2)
-            fig.savefig(RESULTS_DIR / f"batch{b}_ttft.png", dpi=200)
-            plt.close(fig)
-
-        # 4) inter-token
-        if x and y_inter:
-            fig, ax = plt.subplots(figsize=(6, 4))
-            ax.plot(x, y_inter, marker="o", color="C3")
-            ax.set_xlabel("sequence_length")
-            ax.set_ylabel("avg_inter_token_latency (ms)")
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            ax.grid(True, which="both", ls="--", alpha=0.5)
-            fig.tight_layout(pad=2)
-            fig.savefig(RESULTS_DIR / f"batch{b}_inter_token.png", dpi=200)
-            plt.close(fig)
-
+    
+    print(f"e2e对比图生成完成，保存在: {E2E_DIR}")
 
 def main():
     parser = argparse.ArgumentParser(description="TensorRT-LLM benchmark runner & plotter")
-    parser.add_argument("--plot-only", action="store_true",
-                        help="Skip dataset/benchmark generation; only (re)draw figures from all_results.csv")
+    parser.add_argument("--plot-e2e-only", action="store_true",
+                        help="Only generate e2e comparison plots from existing e2e_results.csv")
     parser.add_argument("--skip-bandwidth-plots", action="store_true",
                         help="Skip generating bandwidth analysis plots")
     parser.add_argument("--batches", default="1-5", help="batch sizes, e.g. 1-5 or 1,3,5")
@@ -495,14 +632,14 @@ def main():
     parser.add_argument("--tp", default="2", help="tensor parallel sizes, e.g. 2-8 or 2,4,8")
     parser.add_argument("--nccl-protos", default="Simple,LL,LL128", help="NCCL protos when algo=NCCL")
     args = parser.parse_args()
-
-    if args.plot_only:
-        csv_path = RESULTS_DIR / "all_results.csv"
-        if not csv_path.exists():
-            print(f"[ERROR] --plot-only 需要 {csv_path} 已存在")
+    
+    if args.plot_e2e_only:
+        e2e_csv_path = E2E_DIR / "e2e_results.csv"
+        if not e2e_csv_path.exists():
+            print(f"[ERROR] --plot-e2e-only 需要 {e2e_csv_path} 已存在")
             sys.exit(1)
-        print("[INFO] 仅绘图模式，跳过数据生成与 benchmark")
-        plot_graphs(csv_path)
+        print("[INFO] 仅e2e绘图模式，跳过数据生成与 benchmark")
+        plot_e2e_comparison_graphs(e2e_csv_path)
         return
 
     ensure_dirs()
@@ -532,8 +669,6 @@ def main():
             if not ok_gen:
                 continue
             ok_bench = run_benchmark(s, b, algo, tp, proto)
-            # name = f"comm_bs{b}_sl{s}_tp{tp}_algo{algo}{'_' + proto if proto else ''}.csv"
-            # sort_comm_csv(str(COMM_DIR / name))
             
             # Merge GPU-specific communication CSV files
             merge_communication_csv(b, s, tp, algo, proto)
@@ -584,8 +719,15 @@ def main():
             comparison_metrics=['bandwidth', 'latency', 'communication'],
         )
 
-    # 绘图逻辑暂保留原函数，如需兼容新 CSV 再迭代
-
+    # 合并e2e结果并生成对比图
+    print("[INFO] 合并e2e结果...")
+    e2e_merged_csv = merge_e2e_csv()
+    if e2e_merged_csv and e2e_merged_csv.exists():
+        print(f"[INFO] e2e结果已合并到: {e2e_merged_csv}")
+        print("[INFO] 生成e2e多算法对比图...")
+        plot_e2e_comparison_graphs(e2e_merged_csv)
+    else:
+        print("[WARN] 没有找到e2e结果文件进行合并和绘图")
 
 if __name__ == "__main__":
     main()

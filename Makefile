@@ -20,6 +20,7 @@ clean:
 		$(MAKE) clean-results; \
 		$(MAKE) clean-figures; \
 		$(MAKE) clean-merged; \
+		$(MAKE) clean-e2e; \
 	else \
 		echo "Confirmation failed. Aborting cleanup."; \
 		exit 1; \
@@ -53,4 +54,14 @@ clean-merged:
 		echo "Merged directory cleaned successfully (files removed, subdirectories preserved)"; \
 	else \
 		echo "Merged directory not found"; \
+	fi
+
+# Clean e2e directory - only delete files, preserve subdirectories
+clean-e2e:
+	@echo "Cleaning e2e directory..."
+	@if [ -d "e2e" ]; then \
+		find e2e -type f -delete; \
+		echo "E2E directory cleaned successfully (files removed, subdirectories preserved)"; \
+	else \
+		echo "E2E directory not found"; \
 	fi
