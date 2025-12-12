@@ -55,7 +55,7 @@ python run_benchmark.py [OPTIONS]
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--batches` | Batch sizes to benchmark. Supports range (e.g., `1-5`) or list (e.g., `1,3,5`). | `1-5` |
-| `--seqs` | Sequence labels list (e.g., `128,256`). | (Defined in code) |
+| `--seqs` | Sequence labels list (e.g., `128,256`). | (128,256,512,1k,2k) |
 | `--algos` | Algorithms to evaluate (comma-separated). | `NCCL,ONWSHOT,TWOSHOT` |
 | `--tp` | Tensor parallel sizes. Supports range or list. | `4` |
 | `--nccl-protos` | NCCL protocols to use when algorithm is set to `NCCL`. | `Simple,LL,LL128` |
