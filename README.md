@@ -17,9 +17,9 @@ To generate the communication logs (`comm_*.csv`), you need to modify the Tensor
 [allreducePlugin.cpp Modification Example](https://github.com/yesyesyeswe/TensorRT-LLM/blob/82239824ab19695c5459035d8e05ecdfadfa51f8/cpp/tensorrt_llm/plugins/ncclPlugin/allreducePlugin.cpp#L395-L473)
 
 **Why is this needed?**
-The standard TensorRT-LLM build does not output per-operation communication latency and timestamps. The modification injects logging logic into `allreducePlugin.cpp` to record Communication Data sizes
+The standard TensorRT-LLM build does not output per-operation communication volumes. The modification injects logging logic into `allreducePlugin.cpp` to record Communication Data sizes
 
-The benchmark tool relies on these logs (saved as `comm_bs{...}.csv`) to correlate communication events with other metrics.
+The benchmark tool relies on these logs (saved as `comm_bs{...}.csv`) to correlate communication events with other metrics. The csv files will be saved in the path defined by the macro COMM_RESULTS_DIR.
 
 ## Prerequisites: Build & Installation
 
@@ -65,7 +65,11 @@ python run_benchmark.py [OPTIONS]
 ## Examples
 
 ### 1. Basic Run
-Run with default settings (Batch sizes 1-5, TP=2, Algo=NCCL_Simple):
+Before running the benchmark, set the directory path where the communication CSV result files will be saved by executing the following command:
+```bash
+export COMM_RESULTS_DIR=/root/autodl-tmp/TensorRT-LLM/mybenchmark/results
+```
+You can then run the benchmark with its default configuration (batch sizes 1-5, TP=2, Algorithm=NCCL) using:
 ```bash
 python run_benchmark.py
 ```
@@ -75,6 +79,7 @@ Run with specific batch sizes (1, 2, 4, 8), sequence length (1k), tensor paralle
 ```bash
 python run_benchmark.py --batches 1,2,4,8 --seqs 1k --tp 4 --algos NCCL,ONESHOT --nccl-protos LL
 ```
+For a specific NCCL strategy that uses only the ring algorithm for allreduce, configure the NCCL_ALGO environment variable as "allreduce:ring".
 
 ### 3. Plotting Only
 If you have already run the benchmarks and want to regenerate the plots from the saved results:
